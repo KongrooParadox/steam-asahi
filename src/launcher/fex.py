@@ -18,9 +18,12 @@ from common import (
     STEAM_CLIENT_ARGS,
     LauncherError,
     copy_bootstrap,
+    desktop_entry_runs_client,
     exec_guest,
+    install_managed_desktop_entry,
     muvm_arguments,
     show_startup_splash,
+    start_desktop_entry_watcher,
     warn_missing_audio_socket,
     write_managed_value,
     xdg_home,
@@ -172,6 +175,24 @@ class FexLauncher:
         write_managed_value(marker, "ok")
         print("Steam bootstrap ready.")
 
+    def repair_desktop_entries(self) -> None:
+        # This backend runs the client in the caller's own home, so its
+        # shortcuts are already where the host's application launcher looks.
+        # Only their Exec line is wrong: it names a command that resolves only
+        # inside the microVM. Repair the entries in place to keep the client's
+        # own names and artwork.
+        directories = [
+            xdg_home("XDG_DESKTOP_DIR", "Desktop"),
+            self.data_home / "applications",
+        ]
+        for directory in directories:
+            for path in directory.glob("*.desktop"):
+                if not desktop_entry_runs_client(path):
+                    continue
+                install_managed_desktop_entry(
+                    path, path, self.config["LAUNCHER_COMMAND"]
+                )
+
     def main(self, arguments: list[str]) -> None:
         if Path(self.config["MUVM_HOST_MOUNT"]).is_dir():
             raise LauncherError(
@@ -205,6 +226,7 @@ class FexLauncher:
             "Starting Steam (microVM + FEX)...",
         )
         self.install_steam_bootstrap()
+        start_desktop_entry_watcher(self.repair_desktop_entries)
         print("Launching Steam via muvm + FEX...")
         # muvm proxies a forwarded command's stdio only when asked, and that
         # proxy rejects the /dev/null an application launcher provides; only
