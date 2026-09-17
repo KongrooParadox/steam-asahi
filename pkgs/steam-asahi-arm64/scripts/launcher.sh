@@ -25,6 +25,7 @@ readonly -a REQUIRED_CONFIGURATION_VARIABLES=(
   GUEST_LAUNCHER
   HOST_LIBRARIES
   INIT_SCRIPT
+  LAUNCHER_COMMAND
   MUVM
   PROTON_DIRECTORY
   PROTON_CONFIGURATOR
@@ -60,12 +61,16 @@ readonly -a MUVM_BASE_ARGS=(
 readonly -a MUVM_DETACHED_ARGS=()
 # shellcheck disable=SC2034
 readonly -a MUVM_INTERACTIVE_ARGS=(--interactive)
+# The prefix the client gives the artwork of the shortcuts it generates.
+readonly CLIENT_ICON_PREFIX=steam_icon_
 readonly EXECUTABLE_FILE_MODE=0755
+readonly EXPORTED_ENTRY_PREFIX=steam-asahi-
 readonly LEGACY_COMPATIBILITY_FILE=steam-asahi-arm64.vdf
 readonly MAX_PROTON_LOG_SIZE_BYTES=$(( 1024 * 1024 ))
 readonly PRIVATE_FILE_MODE=0600
 readonly READ_ONLY_FILE_MODE=0644
 readonly RUNTIME_DISPLAY_NAME='Steam Linux Runtime 4.0 - Arm64'
+readonly SHORTCUT_EXPORT_INTERVAL_SECONDS=5
 readonly SPLASH_HOLD_SECONDS=5
 # EX_CANTCREAT is outside the normal command-exit range and reserved here for
 # flock's synthetic lock-contention status.
@@ -335,6 +340,121 @@ ${LEGACY_COMPATIBILITY_FILE}"
   fi
 }
 
+# A mirrored entry is refreshed when it is missing, older than the client's own
+# entry, or no longer carries that entry's mode. Without the last case a
+# mirror written with the wrong mode would never be repaired, because it is
+# always the newer file.
+entry_needs_export() {
+  local source_path=$1
+  local target_path=$2
+
+  [[ -f "${target_path}" ]] || return 0
+  [[ ! "${source_path}" -nt "${target_path}" ]] || return 0
+  [[ "${ stat -c %a -- "${source_path}"; }" \
+    != "${ stat -c %a -- "${target_path}"; }" ]]
+}
+
+exported_entry_has_source() {
+  local entry_name=$1
+  local source_directory
+
+  shift
+  for source_directory in "$@"; do
+    [[ ! -f "${source_directory}/${entry_name}" ]] || return 0
+  done
+  return 1
+}
+
+# Both shortcut locations the client writes to live below the isolated home,
+# where the host's application launcher never looks. Mirror them into the real
+# data home and drop the exports whose originals are gone.
+export_desktop_entries() {
+  local -r GLOBSORT=nosort
+  local entry_name
+  local source_directory
+  local -ar source_directories=(
+    "${HOME}/Desktop"
+    "${XDG_DATA_HOME}/applications"
+  )
+  local source_path
+  local -a source_paths
+  local target_directory="${SOURCE_DATA_HOME}/applications"
+  local target_path
+  local -a target_paths
+
+  mkdir -p -- "${target_directory}"
+  for source_directory in "${source_directories[@]}"; do
+    source_paths=("${source_directory}"/*.desktop)
+    for source_path in "${source_paths[@]}"; do
+      entry_name="${source_path##*/}"
+      target_path="${target_directory}/${EXPORTED_ENTRY_PREFIX}${entry_name}"
+      entry_needs_export "${source_path}" "${target_path}" || continue
+      install_managed_desktop_entry \
+        "${source_path}" "${target_path}" "${LAUNCHER_COMMAND}"
+    done
+  done
+
+  target_paths=("${target_directory}/${EXPORTED_ENTRY_PREFIX}"*.desktop)
+  for target_path in "${target_paths[@]}"; do
+    desktop_entry_is_managed "${target_path}" || continue
+    entry_name="${target_path##*/}"
+    entry_name="${entry_name#"${EXPORTED_ENTRY_PREFIX}"}"
+    exported_entry_has_source "${entry_name}" "${source_directories[@]}" \
+      || rm -f -- "${target_path}"
+  done
+}
+
+# Exported entries reference per-game icons by name, so the artwork has to
+# follow them out of the isolated home into the same theme directories. Nothing
+# is removed here: artwork that no entry names is already invisible, and the
+# x86 backend installs identically named icons into this very directory.
+export_shortcut_icons() {
+  local -r GLOBSORT=nosort
+  local relative_path
+  local source_directory="${XDG_DATA_HOME}/icons"
+  local source_path
+  local -a source_paths
+  local target_directory="${SOURCE_DATA_HOME}/icons"
+  local target_path
+
+  source_paths=("${source_directory}"/*/*/apps/"${CLIENT_ICON_PREFIX}"*)
+  for source_path in "${source_paths[@]}"; do
+    relative_path="${source_path#"${source_directory}/"}"
+    target_path="${target_directory}/${relative_path}"
+    [[ ! -f "${target_path}" || "${source_path}" -nt "${target_path}" ]] \
+      || continue
+    mkdir -p -- "${target_path%/*}"
+    install_managed_file \
+      "${source_path}" "${target_path}" "${READ_ONLY_FILE_MODE}"
+  done
+}
+
+export_client_shortcuts() {
+  # An isolated home pointed back at the caller's own data home would export
+  # each entry onto itself.
+  [[ "${SOURCE_DATA_HOME}" != "${XDG_DATA_HOME}" ]] || return 0
+  export_shortcut_icons
+  export_desktop_entries
+}
+
+# The launcher execs into muvm, so shortcuts added during a session can only be
+# observed by a watcher that outlives that exec. It polls because the isolated
+# home reaches the client through virtiofs, where inotify events raised inside
+# the microVM never surface on the host. The unlocked pass it watches lives for
+# exactly as long as the client does.
+start_shortcut_export() {
+  local launcher_pid=$$
+
+  export_client_shortcuts
+  (
+    while kill -0 "${launcher_pid}" 2>/dev/null; do
+      sleep "${SHORTCUT_EXPORT_INTERVAL_SECONDS}"
+      export_client_shortcuts || true
+    done
+    export_client_shortcuts || true
+  ) >/dev/null 2>&1 &
+}
+
 show_splash() {
   local cef_log="${STEAM_DIRECTORY}/logs/cef_log.txt"
 
@@ -366,6 +486,10 @@ main() {
 
   printf 'Using isolated ARM64 Steam home: %s\n' "${HOME}"
   if [[ "${STEAM_ASAHI_LOCKED:-0}" != 1 ]]; then
+    # `flock --no-fork` passes its lock descriptor to the pass it runs and to
+    # every process that pass starts. The watcher outlives the client, so it
+    # has to be started here, where no descriptor can be inherited from it.
+    start_shortcut_export
     run_with_steam_lock "${launcher_arguments[@]}"
   fi
 
@@ -408,6 +532,6 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  shopt -s array_expand_once inherit_errexit
+  shopt -s array_expand_once inherit_errexit nullglob
   main "$@"
 fi

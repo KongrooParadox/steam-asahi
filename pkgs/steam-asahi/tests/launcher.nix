@@ -62,8 +62,29 @@ runCommand "steam-asahi-launcher-test" { } ''
 
   data_directory="$XDG_DATA_HOME/steam-asahi"
   rootfs_directory="$XDG_DATA_HOME/fex-emu/RootFS"
-  mkdir -p "$rootfs_directory"
+  mkdir -p "$rootfs_directory" "$HOME/Desktop" "$XDG_DATA_HOME/applications"
   touch "$rootfs_directory/test.sqsh"
+
+  # Shortcuts of the shape the client writes into the caller's own home, one
+  # executable like a desktop-directory launcher, plus an unrelated entry.
+  cat >"$HOME/Desktop/Test Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Test Game
+  Exec=steam steam://rungameid/999999
+  Icon=steam_icon_999999
+  EOF
+  chmod 0755 "$HOME/Desktop/Test Game.desktop"
+  cp "$HOME/Desktop/Test Game.desktop" \
+    "$XDG_DATA_HOME/applications/Test Game.desktop"
+  chmod 0644 "$XDG_DATA_HOME/applications/Test Game.desktop"
+  cat >"$XDG_DATA_HOME/applications/unrelated.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Unrelated
+  Exec=steam-like-thing --flag
+  EOF
+  unrelatedHash=$(sha256sum "$XDG_DATA_HOME/applications/unrelated.desktop")
 
   ${lib.meta.getExe package} \
     'steam://open/games?filter=ready to play' \
@@ -101,6 +122,19 @@ runCommand "steam-asahi-launcher-test" { } ''
     'steam://open/games?filter=ready to play' \
     "$HOME/steam-arguments"
   grep -F -- '-fex-steam.sh' "$HOME/steam-arguments"
+
+  # Game shortcuts keep their names and artwork, and only their command is
+  # replaced. A second launch must not add a second marker.
+  desktopEntry="$HOME/Desktop/Test Game.desktop"
+  menuEntry="$XDG_DATA_HOME/applications/Test Game.desktop"
+  grep -Fx 'Exec=steam-asahi steam://rungameid/999999' "$desktopEntry"
+  grep -Fx 'Exec=steam-asahi steam://rungameid/999999' "$menuEntry"
+  grep -Fx Icon=steam_icon_999999 "$desktopEntry"
+  test "$(grep -Fxc X-SteamAsahi-Managed=true "$desktopEntry")" = 1
+  test "$(stat -c %a "$desktopEntry")" = 755
+  test "$(stat -c %a "$menuEntry")" = 644
+  test "$(sha256sum "$XDG_DATA_HOME/applications/unrelated.desktop")" = \
+    "$unrelatedHash"
 
   # A complete bootstrap is preserved on subsequent launches.
   printf '%s\n' preserved > "$data_directory/steam-launcher/bin_steam.sh"

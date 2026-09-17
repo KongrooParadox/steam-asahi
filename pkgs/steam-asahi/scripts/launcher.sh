@@ -20,6 +20,7 @@ readonly -a REQUIRED_CONFIGURATION_VARIABLES=(
   FEX_ROOTFS_FETCHER
   FEX_STEAM_SCRIPT
   INIT_SCRIPT
+  LAUNCHER_COMMAND
   MUVM
   MUVM_HOST_MOUNT
   MUVM_PATH
@@ -76,6 +77,7 @@ readonly -a MUVM_BASE_ARGS=(
 # application launcher provides. Steam writes to its own logs, so only the
 # diagnostic below, which a person runs from a terminal, asks for the proxy.
 readonly -a MUVM_INTERACTIVE_ARGS=(--interactive)
+readonly SHORTCUT_REPAIR_INTERVAL_SECONDS=5
 readonly SPLASH_HOLD_SECONDS=10
 
 is_fex_rootfs() {
@@ -143,6 +145,47 @@ ensure_fex_rootfs() {
     "${FEX_ROOTFS_FETCHER}" "${FEX_ROOTFS_FETCH_ARGS[@]}" \
       || die 'FEX rootfs download failed; run FEXRootFSFetcher manually.'
   fi
+}
+
+# This backend runs the client in the caller's own home, so its shortcuts are
+# already where the host's application launcher looks. Only their `Exec` line
+# is wrong: it names a command that resolves inside the microVM. Repair the
+# entries where they are, which keeps the client's own names and artwork.
+repair_desktop_entries() {
+  local -r GLOBSORT=nosort
+  local data_home=$1
+  local entry_directory
+  local -ar entry_directories=(
+    "${XDG_DESKTOP_DIR:-${HOME}/Desktop}"
+    "${data_home}/applications"
+  )
+  local entry_path
+  local -a entry_paths
+
+  for entry_directory in "${entry_directories[@]}"; do
+    entry_paths=("${entry_directory}"/*.desktop)
+    for entry_path in "${entry_paths[@]}"; do
+      desktop_entry_runs_client "${entry_path}" || continue
+      install_managed_desktop_entry \
+        "${entry_path}" "${entry_path}" "${LAUNCHER_COMMAND}"
+    done
+  done
+}
+
+# Shortcuts appear while the client runs, and the launcher execs into muvm, so
+# the repair has to come from a watcher that outlives that exec.
+start_shortcut_repair() {
+  local data_home=$1
+  local launcher_pid=$$
+
+  repair_desktop_entries "${data_home}"
+  (
+    while kill -0 "${launcher_pid}" 2>/dev/null; do
+      sleep "${SHORTCUT_REPAIR_INTERVAL_SECONDS}"
+      repair_desktop_entries "${data_home}" || true
+    done
+    repair_desktop_entries "${data_home}" || true
+  ) >/dev/null 2>&1 &
 }
 
 show_splash() {
@@ -225,6 +268,7 @@ main() {
   warn_missing_audio_socket
   show_splash
   install_steam_bootstrap "${data_directory}"
+  start_shortcut_repair "${data_home}"
   run_steam "${data_directory}" "$@"
 }
 
