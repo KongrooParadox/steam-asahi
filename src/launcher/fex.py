@@ -120,7 +120,10 @@ class FexLauncher:
             ) from error
 
     def muvm_arguments(
-        self, extra_environment: Mapping[str, str] | None = None
+        self,
+        extra_environment: Mapping[str, str] | None = None,
+        *,
+        interactive: bool = True,
     ) -> list[str]:
         config = self.config
         path = ":".join(
@@ -144,7 +147,9 @@ class FexLauncher:
             },
         }
         environment.update(extra_environment or {})
-        return muvm_arguments(config, environment, emulator="fex")
+        return muvm_arguments(
+            config, environment, emulator="fex", interactive=interactive
+        )
 
     def fex_arguments(self, script: str, arguments: list[str]) -> list[str]:
         # FEXBash interprets a command string; remaining argv stays intact
@@ -201,12 +206,16 @@ class FexLauncher:
         )
         self.install_steam_bootstrap()
         print("Launching Steam via muvm + FEX...")
+        # muvm proxies a forwarded command's stdio only when asked, and that
+        # proxy rejects the /dev/null an application launcher provides; only
+        # the --fex diagnostic above asks for the proxy
         exec_guest(
             self.muvm_arguments(
                 {
                     "PRESSURE_VESSEL_FILESYSTEMS_RO": PRESSURE_VESSEL_FILESYSTEMS_RO,
                     "STEAM_ASAHI_GUEST_UID": str(os.geteuid()),
-                }
+                },
+                interactive=False,
             )
             + self.config["EXTRA_ENVIRONMENT_ARGS"]
             + self.fex_arguments(
