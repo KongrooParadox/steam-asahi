@@ -191,6 +191,9 @@ together with their artwork.
 Entries the launcher manages carry `X-SteamAsahi-Managed=true`. It removes
 only entries carrying that marker, and never removes icons.
 
+Starting a shortcut while Steam Asahi is already running opens the game in
+the running client.
+
 ## Troubleshooting
 
 - **Waiting for network on a fresh login:** this is a current Steam client

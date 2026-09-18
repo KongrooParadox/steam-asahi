@@ -436,6 +436,7 @@ test_launcher() {
   local launcher_root="${TEST_ROOT}/launcher"
   local home="${launcher_root}/home with spaces"
   local output="${launcher_root}/muvm-arguments"
+  local runtime_directory="${launcher_root}/runtime"
   local source_applications="${home}/data/applications"
   local exported_desktop_entry=\
 "${source_applications}/steam-asahi-Desktop Game.desktop"
@@ -467,6 +468,7 @@ test_launcher() {
   mkdir -p -- \
     "${launcher_root}/bootstrap" \
     "${launcher_root}/host-libs" \
+    "${runtime_directory}" \
     "${source_applications}" \
     "${source_icons}" \
     "${steam_home}/Desktop" \
@@ -547,6 +549,7 @@ EOF
       TEST_MUVM_OUTPUT="${output}" \
       TOOL_MANIFEST="${launcher_root}/toolmanifest.vdf" \
       XDG_DATA_HOME="${home}/data" \
+      XDG_RUNTIME_DIR="${runtime_directory}" \
       YAD=/bin/false \
       bash "${PACKAGE_ROOT}/scripts/launcher.sh" "$@"
   }
@@ -621,6 +624,41 @@ EOF
     'ERROR: Close Steam before changing a compatibility-tool mapping' \
     "${launcher_root}/lock-error" >/dev/null \
     || fail 'the lock conflict did not explain how to proceed'
+
+  local muvm_lock_pid
+  local muvm_lock_ready="${launcher_root}/muvm-lock-ready"
+  local muvm_lock_release="${launcher_root}/muvm-lock-release"
+  touch -- "${muvm_lock_release}"
+  (
+    exec {lock_descriptor}>"${runtime_directory}/muvm.lock"
+    flock --exclusive "${lock_descriptor}"
+    touch -- "${muvm_lock_ready}"
+    while [[ -e "${muvm_lock_release}" ]]; do
+      sleep 0.05
+    done
+  ) &
+  muvm_lock_pid=$!
+  while [[ ! -e "${muvm_lock_ready}" ]]; do
+    kill -0 "${muvm_lock_pid}" 2>/dev/null \
+      || fail 'the muvm runtime lock holder exited early'
+    sleep 0.05
+  done
+  run_test_launcher "steam://rungameid/${TEST_SHORTCUT_APP_ID}" \
+    >"${launcher_root}/forward-output" 2>&1 \
+    || fail 'the launcher refused to forward a shortcut URL'
+  rm -f -- "${muvm_lock_release}"
+  wait "${muvm_lock_pid}"
+  assert_file_contains_line \
+    "${output}" "${steam_directory}/steamrtarm64/steam"
+  assert_file_contains_line \
+    "${output}" "steam://rungameid/${TEST_SHORTCUT_APP_ID}"
+  if grep -Fqx -- '--steam' "${output}"; then
+    fail 'a forwarded URL restarted the client instead of reaching it'
+  fi
+  if grep -Fqx -- '--interactive' "${output}"; then
+    fail 'a forwarded URL asked muvm to proxy stdio it cannot have'
+  fi
+
   rm -f -- "${hold_file}"
   wait "${running_pid}"
 
