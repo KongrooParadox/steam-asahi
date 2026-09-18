@@ -69,9 +69,13 @@ readonly -a MUVM_BASE_ARGS=(
   "${MUVM_VRAM_ARGS[@]}"
   "${MUVM_NETWORK_ARGS[@]}"
   --execute-pre "${INIT_SCRIPT}"
-  --interactive
   -e "PATH=${GUEST_PATH}"
 )
+# muvm proxies a forwarded command's stdio only when asked to be interactive,
+# and that proxy registers stdin with epoll, which rejects the /dev/null an
+# application launcher provides. Steam writes to its own logs, so only the
+# diagnostic below, which a person runs from a terminal, asks for the proxy.
+readonly -a MUVM_INTERACTIVE_ARGS=(--interactive)
 readonly SPLASH_HOLD_SECONDS=10
 
 is_fex_rootfs() {
@@ -177,6 +181,7 @@ run_fex_diagnostic() {
   run_in_clean_environment \
     "${MUVM}" \
     "${MUVM_BASE_ARGS[@]}" \
+    "${MUVM_INTERACTIVE_ARGS[@]}" \
     -- \
     "${FEX_BASH}" "${FEX_BASH_COMMAND}" steam-asahi-fex \
     "${FEX_DIAGNOSTIC_SCRIPT}" "${command}"

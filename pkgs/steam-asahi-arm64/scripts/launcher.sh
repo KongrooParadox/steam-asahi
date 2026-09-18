@@ -51,8 +51,15 @@ readonly -a MUVM_BASE_ARGS=(
   "${VRAM_ARGS[@]}"
   "${NETWORK_ARGS[@]}"
   --execute-pre "${INIT_SCRIPT}"
-  --interactive
 )
+# muvm proxies a forwarded command's stdio only when asked to be interactive,
+# and that proxy registers stdin with epoll, which rejects the /dev/null an
+# application launcher provides. The flag is ignored when muvm boots a
+# microVM, so only a diagnostic a person runs from a terminal asks for it.
+# shellcheck disable=SC2034
+readonly -a MUVM_DETACHED_ARGS=()
+# shellcheck disable=SC2034
+readonly -a MUVM_INTERACTIVE_ARGS=(--interactive)
 readonly EXECUTABLE_FILE_MODE=0755
 readonly LEGACY_COMPATIBILITY_FILE=steam-asahi-arm64.vdf
 readonly MAX_PROTON_LOG_SIZE_BYTES=$(( 1024 * 1024 ))
@@ -143,10 +150,16 @@ run_with_steam_lock() {
   exit "${status}"
 }
 
+# The first argument names the array of muvm stdio options to apply.
 run_guest() {
+  local stdio_options_name=$1
+  local -n stdio_options="${stdio_options_name}"
+
+  shift
   run_in_clean_environment \
     "${MUVM}" \
     "${MUVM_BASE_ARGS[@]}" \
+    "${stdio_options[@]}" \
     -e "PRESSURE_VESSEL_FILESYSTEMS_RO=${PRESSURE_VESSEL_FILESYSTEMS_RO}" \
     -e "STEAM_ASAHI_GUEST_HOME=${HOME}" \
     -e "STEAM_ASAHI_GUEST_UID=${EUID}" \
@@ -348,7 +361,7 @@ main() {
       '--import-login cannot be combined with --guest'
     shift
     (( $# > 0 )) || die 'usage: steam-asahi --guest command [arguments...]'
-    run_guest "$@"
+    run_guest MUVM_INTERACTIVE_ARGS "$@"
   fi
 
   printf 'Using isolated ARM64 Steam home: %s\n' "${HOME}"
@@ -387,6 +400,7 @@ main() {
 
   printf '%s\n' 'Launching native ARM64 Steam via muvm...'
   run_guest \
+    MUVM_DETACHED_ARGS \
     --steam \
     "${CLIENT_DIRECTORY}/steam" \
     "${STEAM_CLIENT_ARGS[@]}" \
