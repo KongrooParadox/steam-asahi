@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import fcntl
 import os
-import stat
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -19,7 +18,10 @@ from common import (
     STEAM_CLIENT_ARGS,
     LauncherError,
     copy_bootstrap,
+    desktop_entry_app_id,
+    desktop_entry_client_app_id,
     desktop_entry_is_managed,
+    desktop_entry_needs_export,
     exec_guest,
     executable,
     install_managed_desktop_entry,
@@ -245,48 +247,88 @@ class Arm64Launcher:
             # Optional log rotation must not prevent Steam from launching
             pass
 
-    def entry_needs_export(self, source: Path, target: Path) -> bool:
-        # A mirrored entry is refreshed when it is missing, older than the
-        # client's own entry, or no longer carries that entry's mode. Without
-        # the last case a mirror written with the wrong mode would never be
-        # repaired, because it is always the newer file.
-        if not target.is_file():
-            return True
-        if source.stat().st_mtime_ns > target.stat().st_mtime_ns:
-            return True
-        return stat.S_IMODE(source.stat().st_mode) != stat.S_IMODE(
-            target.stat().st_mode
-        )
-
     def export_desktop_entries(self) -> None:
         # Both shortcut locations the client writes to live below the isolated
         # home, where the host's application launcher never looks. Mirror them
         # into the real data home and drop the exports whose originals are
         # gone.
         config = self.config
-        prefix = f"{config['LAUNCHER_COMMAND']}-"
+        # Fixed per install, so exports written before the backends had their
+        # own command names keep the same file names
+        prefix = config["ENTRY_PREFIX"]
+        x86_prefix = config["X86_ENTRY_PREFIX"]
+        # Games that only the x86 backend can run are not mirrored. This client
+        # would start them and fail, so their menu entries belong to the x86
+        # launcher
+        x86_games = frozenset(config["X86_GAMES"])
         sources = [
             self.home / "Desktop",
             self.home / ".local/share/applications",
         ]
         target_directory = self.source_data_home / "applications"
         target_directory.mkdir(parents=True, exist_ok=True)
+        exported_names: set[str] = set()
         for source_directory in sources:
             for source_path in source_directory.glob("*.desktop"):
+                if desktop_entry_app_id(source_path) in x86_games:
+                    continue
+                exported_names.add(source_path.name)
                 target_path = target_directory / f"{prefix}{source_path.name}"
-                if not self.entry_needs_export(source_path, target_path):
+                if not desktop_entry_needs_export(
+                    source_path, target_path, config["LAUNCHER_COMMAND"]
+                ):
                     continue
                 install_managed_desktop_entry(
                     source_path, target_path, config["LAUNCHER_COMMAND"]
                 )
         for target_path in target_directory.glob(f"{prefix}*.desktop"):
+            # Mirrors of x86 shortcuts share this prefix, and the section below
+            # decides when they go
+            if target_path.name.startswith(x86_prefix):
+                continue
             if not desktop_entry_is_managed(target_path):
                 continue
             entry_name = target_path.name.removeprefix(prefix)
-            if any(
-                (source_directory / entry_name).is_file()
-                for source_directory in sources
-            ):
+            if entry_name in exported_names:
+                continue
+            target_path.unlink(missing_ok=True)
+
+        # The x86 client writes into the caller's home, and the x86 launcher
+        # mirrors all of its shortcuts under x86_prefix. This launcher mirrors
+        # only x86Games, but both remove a mirror only once the shortcut it
+        # copies is gone, so neither deletes what the other wrote
+        x86_command = config["X86_LAUNCHER_COMMAND"]
+        x86_sources = [
+            self.source_home / "Desktop",
+            self.source_data_home / "applications",
+        ]
+        shortcut_names: set[str] = set()
+        for source_directory in x86_sources:
+            for source_path in source_directory.glob("*.desktop"):
+                if source_path.name.startswith(x86_prefix):
+                    continue
+                app_id = desktop_entry_client_app_id(source_path, x86_command)
+                # The Desktop copy wins when both locations hold a shortcut
+                if app_id is None or source_path.name in shortcut_names:
+                    continue
+                shortcut_names.add(source_path.name)
+                if app_id not in x86_games:
+                    continue
+                target_path = (
+                    target_directory / f"{x86_prefix}{source_path.name}"
+                )
+                icon = f"steam_icon_{app_id}"
+                if not desktop_entry_needs_export(
+                    source_path, target_path, x86_command, icon
+                ):
+                    continue
+                install_managed_desktop_entry(
+                    source_path, target_path, x86_command, icon
+                )
+        for target_path in target_directory.glob(f"{x86_prefix}*.desktop"):
+            if not desktop_entry_is_managed(target_path):
+                continue
+            if target_path.name.removeprefix(x86_prefix) in shortcut_names:
                 continue
             target_path.unlink(missing_ok=True)
 

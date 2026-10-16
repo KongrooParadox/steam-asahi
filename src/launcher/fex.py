@@ -18,6 +18,9 @@ from common import (
     STEAM_CLIENT_ARGS,
     LauncherError,
     copy_bootstrap,
+    desktop_entry_client_app_id,
+    desktop_entry_is_managed,
+    desktop_entry_needs_export,
     desktop_entry_runs_client,
     exec_guest,
     install_managed_desktop_entry,
@@ -155,10 +158,11 @@ class FexLauncher:
         )
 
     def fex_arguments(self, script: str, arguments: list[str]) -> list[str]:
-        # FEXBash interprets a command string; remaining argv stays intact
+        # FEXBash runs /bin/sh with these arguments, so -c selects the command
         return [
             "--",
             self.config["FEX_BASH"],
+            "-c",
             FEX_BASH_COMMAND,
             "steam-asahi-fex",
             script,
@@ -178,20 +182,46 @@ class FexLauncher:
     def repair_desktop_entries(self) -> None:
         # This backend runs the client in the caller's own home, so its
         # shortcuts are already where the host's application launcher looks.
-        # Only their Exec line is wrong: it names a command that resolves only
-        # inside the microVM. Repair the entries in place to keep the client's
-        # own names and artwork.
+        # Their Exec line names a command that resolves only inside the
+        # microVM, so repair it in place to keep the client's own names and
+        # artwork. Mirror every game shortcut under this backend's prefix too,
+        # so the menu finds it while another backend is running
+        config = self.config
+        prefix = config["ENTRY_PREFIX"]
+        launcher_command = config["LAUNCHER_COMMAND"]
+        target_directory = self.data_home / "applications"
+        target_directory.mkdir(parents=True, exist_ok=True)
         directories = [
             xdg_home("XDG_DESKTOP_DIR", "Desktop"),
-            self.data_home / "applications",
+            target_directory,
         ]
+        shortcut_names: set[str] = set()
         for directory in directories:
             for path in directory.glob("*.desktop"):
-                if not desktop_entry_runs_client(path):
+                if path.name.startswith(prefix):
+                    continue
+                if desktop_entry_runs_client(path):
+                    install_managed_desktop_entry(path, path, launcher_command)
+                app_id = desktop_entry_client_app_id(path, launcher_command)
+                # The Desktop copy wins when both locations hold a shortcut
+                if app_id is None or path.name in shortcut_names:
+                    continue
+                shortcut_names.add(path.name)
+                target_path = target_directory / f"{prefix}{path.name}"
+                icon = f"steam_icon_{app_id}"
+                if not desktop_entry_needs_export(
+                    path, target_path, launcher_command, icon
+                ):
                     continue
                 install_managed_desktop_entry(
-                    path, path, self.config["LAUNCHER_COMMAND"]
+                    path, target_path, launcher_command, icon
                 )
+        for target_path in target_directory.glob(f"{prefix}*.desktop"):
+            if not desktop_entry_is_managed(target_path):
+                continue
+            if target_path.name.removeprefix(prefix) in shortcut_names:
+                continue
+            target_path.unlink(missing_ok=True)
 
     def main(self, arguments: list[str]) -> None:
         if Path(self.config["MUVM_HOST_MOUNT"]).is_dir():

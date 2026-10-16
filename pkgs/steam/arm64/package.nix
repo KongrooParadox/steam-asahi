@@ -49,6 +49,9 @@
   publishPorts ? [ ],
   # null uses the default below the caller's original XDG data home
   customSteamHomeDir ? null,
+  # AppIDs that only the x86 backend can run. This client leaves their menu
+  # entries to the x86 launcher
+  x86Games ? [ ],
   extraEnv ? launcherEnvironments.arm64,
 }:
 
@@ -163,6 +166,7 @@ let
   };
 
   launcher = (mkHostLauncher.override { inherit python314; }) {
+    launcherName = "steam-asahi-arm64";
     runtimeInputs = [
       coreutils
     ];
@@ -175,6 +179,7 @@ let
       CUSTOM_STEAM_HOME_DIR = if customSteamHomeDir == null then "" else customSteamHomeDir;
       DEFAULT_STEAM_HOME_DIR = "steam-asahi-arm64-home";
       DISPLAY_NAME = armProton.displayName;
+      ENTRY_PREFIX = "steam-asahi-";
       GUEST_LAUNCHER = lib.meta.getExe guestLauncher;
       HOST_LIBRARIES = "${nativeRuntime}/lib";
       INIT_SCRIPT = lib.meta.getExe initScript;
@@ -187,6 +192,9 @@ let
       RUNTIME_APP_ID = armProton.runtimeAppId;
       RUNTIME_DIRECTORY = armProton.runtimeDirectory;
       TOOL_MANIFEST = "${./proton/toolmanifest.vdf}";
+      X86_ENTRY_PREFIX = "steam-asahi-x86-";
+      X86_GAMES = map toString x86Games;
+      X86_LAUNCHER_COMMAND = "steam-asahi-x86";
       YAD = lib.meta.getExe yad;
     };
 
@@ -197,7 +205,7 @@ let
       # over and launches Valve's unfree redistributable Steam client
       license = lib.licenses.unfree;
       platforms = [ "aarch64-linux" ];
-      mainProgram = "steam-asahi";
+      mainProgram = "steam-asahi-arm64";
     };
   };
 
@@ -213,6 +221,8 @@ in
       customSteamHomeDir
       nativeRuntime
       steam-arm64-client
+      extraEnv
+      x86Games
       ;
     backend = "arm64";
     proton = armProton;

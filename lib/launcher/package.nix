@@ -24,19 +24,19 @@ let
         cp --recursive --dereference -- ${steam-unwrapped}/share/icons "$out/share/"
       '';
 
+  # The entry runs this backend's own command. The default entry that owns the
+  # steam:// scheme comes from the NixOS module, so backends never compete for
+  # those links
+  command = launcher.meta.mainProgram;
   desktopItem = makeDesktopItem {
     inherit desktopName comment;
-    name = "steam-asahi";
-    exec = "steam-asahi %U";
+    name = command;
+    exec = "${command} %U";
     icon = "steam";
     startupNotify = true;
     categories = [
       "Game"
       "Network"
-    ];
-    mimeTypes = [
-      "x-scheme-handler/steam"
-      "x-scheme-handler/steamlink"
     ];
   };
 in

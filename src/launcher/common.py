@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 # and record the change with the marker below
 CLIENT_COMMAND_NAME = "steam"
 MANAGED_ENTRY_MARKER = "X-SteamAsahi-Managed=true"
+RUNGAMEID_PREFIX = "steam://rungameid/"
 PRESSURE_VESSEL_FILESYSTEMS_RO = "/nix:/run/opengl-driver"
 SHORTCUT_REFRESH_INTERVAL_SECONDS = 5
 STEAM_CLIENT_ARGS = ("-cef-force-occlusion",)
@@ -120,11 +121,39 @@ def desktop_entry_is_managed(path: Path) -> bool:
     )
 
 
-def install_managed_desktop_entry(
-    source: Path, destination: Path, launcher_command: str
-) -> None:
-    # The in-place repair passes one path as both source and destination
-    mode = stat.S_IMODE(source.stat().st_mode)
+def desktop_entry_app_id(path: Path) -> str | None:
+    # Client shortcuts name their game in the Exec line
+    for line in desktop_entry_lines(path):
+        if line.startswith("Exec=") and RUNGAMEID_PREFIX in line:
+            return line.split(RUNGAMEID_PREFIX, 1)[1].split(" ", 1)[0]
+    return None
+
+
+def desktop_entry_exec_command(path: Path) -> str | None:
+    for line in desktop_entry_lines(path):
+        if line.startswith("Exec="):
+            return line.removeprefix("Exec=").split(" ", 1)[0]
+    return None
+
+
+def desktop_entry_client_app_id(
+    path: Path, launcher_command: str
+) -> str | None:
+    # The client writes steam into the Exec line, and a launcher replaces it
+    # with its own name once the entry is repaired
+    command = desktop_entry_exec_command(path)
+    if command not in (CLIENT_COMMAND_NAME, launcher_command):
+        return None
+    app_id = desktop_entry_app_id(path)
+    # The AppID becomes part of an icon name, so accept only what Steam writes
+    if app_id is None or not app_id.isdecimal():
+        return None
+    return app_id
+
+
+def desktop_entry_mirror_lines(
+    source: Path, launcher_command: str, icon: str | None = None
+) -> list[str]:
     lines = []
     for line in desktop_entry_lines(source):
         if line == MANAGED_ENTRY_MARKER:
@@ -134,9 +163,46 @@ def install_managed_desktop_entry(
                 f"Exec={launcher_command}"
                 f"{line.removeprefix(f'Exec={CLIENT_COMMAND_NAME}')}"
             )
+        elif icon is not None and line == "Icon=steam":
+            # The client gives every shortcut the generic Steam icon, while the
+            # per-game artwork is named by AppID
+            line = f"Icon={icon}"
         lines.append(line)
+    return [*lines, MANAGED_ENTRY_MARKER]
+
+
+def install_managed_desktop_entry(
+    source: Path,
+    destination: Path,
+    launcher_command: str,
+    icon: str | None = None,
+) -> None:
+    # The in-place repair passes one path as both source and destination
+    mode = stat.S_IMODE(source.stat().st_mode)
     write_managed_value(
-        destination, "\n".join([*lines, MANAGED_ENTRY_MARKER]), mode
+        destination,
+        "\n".join(desktop_entry_mirror_lines(source, launcher_command, icon)),
+        mode,
+    )
+
+
+def desktop_entry_needs_export(
+    source: Path,
+    target: Path,
+    launcher_command: str,
+    icon: str | None = None,
+) -> bool:
+    # Compare the text a mirror would receive, so a mirror written under an
+    # older rule, such as one that kept the generic icon, is rewritten. The
+    # mode is not part of that text, so it is compared separately
+    if not target.is_file():
+        return True
+    if stat.S_IMODE(source.stat().st_mode) != stat.S_IMODE(
+        target.stat().st_mode
+    ):
+        return True
+    return desktop_entry_lines(target) != desktop_entry_mirror_lines(
+        source, launcher_command, icon
     )
 
 

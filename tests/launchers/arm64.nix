@@ -25,6 +25,7 @@ let
       5
     ];
     customSteamHomeDir = "isolated ARM home";
+    x86Games = [ "777777" ];
     memoryMiB = 4096;
     vramMiB = 2048;
     publishPorts = [
@@ -71,6 +72,65 @@ runCommand "steam-asahi-arm64-launcher-test" { } ''
   Icon=steam_icon_999999
   EOF
   chmod 0755 "$isolatedHome/Desktop/Test Game.desktop"
+  # A shortcut for a game the x86 backend runs. This client must not mirror it,
+  # and a mirror left by an earlier export must be removed
+  cat >"$isolatedHome/Desktop/Routed Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Routed Game
+  Exec=steam steam://rungameid/777777
+  Icon=steam_icon_777777
+  EOF
+  chmod 0755 "$isolatedHome/Desktop/Routed Game.desktop"
+  mkdir -p "$sourceHome/Desktop" "$sourceDataHome/applications"
+  cat >"$sourceHome/Desktop/Routed Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Routed Game
+  Exec=steam steam://rungameid/777777
+  Icon=steam
+  EOF
+  chmod 0755 "$sourceHome/Desktop/Routed Game.desktop"
+  cat >"$sourceDataHome/applications/Routed Menu.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Routed Menu
+  Exec=steam steam://rungameid/777777
+  Icon=steam_icon_777777
+  EOF
+  chmod 0644 "$sourceDataHome/applications/Routed Menu.desktop"
+  # A shortcut the x86 launcher mirrored for a game this client does not own,
+  # and a mirror whose shortcut is gone. This export removes only the latter
+  cat >"$sourceHome/Desktop/Other Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Other Game
+  Exec=steam-asahi-x86 steam://rungameid/123456
+  Icon=steam_icon_123456
+  EOF
+  chmod 0755 "$sourceHome/Desktop/Other Game.desktop"
+  cat >"$sourceDataHome/applications/steam-asahi-x86-Other Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Other Game
+  Exec=steam-asahi-x86 steam://rungameid/123456
+  Icon=steam_icon_123456
+  X-SteamAsahi-Managed=true
+  EOF
+  cat >"$sourceDataHome/applications/steam-asahi-x86-Gone Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Gone Game
+  Exec=steam-asahi-x86 steam://rungameid/654321
+  X-SteamAsahi-Managed=true
+  EOF
+  cat >"$sourceDataHome/applications/steam-asahi-Routed Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Routed Game
+  Exec=steam-asahi steam://rungameid/777777
+  X-SteamAsahi-Managed=true
+  EOF
   printf '%s\n' shortcut-icon \
     >"$isolatedHome/.local/share/icons/hicolor/64x64/apps/steam_icon_999999.png"
   touch \
@@ -154,7 +214,18 @@ runCommand "steam-asahi-arm64-launcher-test" { } ''
     "$steamDirectory/config/config.vdf")" = 1
 
   exportedEntry="$sourceDataHome/applications/steam-asahi-Test Game.desktop"
-  grep -Fx 'Exec=steam-asahi steam://rungameid/999999' "$exportedEntry"
+  grep -Fx 'Exec=steam-asahi-arm64 steam://rungameid/999999' "$exportedEntry"
+  test ! -e "$sourceDataHome/applications/steam-asahi-Routed Game.desktop"
+  x86DesktopEntry="$sourceDataHome/applications/steam-asahi-x86-Routed Game.desktop"
+  grep -Fx 'Exec=steam-asahi-x86 steam://rungameid/777777' "$x86DesktopEntry"
+  grep -Fx X-SteamAsahi-Managed=true "$x86DesktopEntry"
+  grep -Fx Icon=steam_icon_777777 "$x86DesktopEntry"
+  test "$(stat -c %a "$x86DesktopEntry")" = 755
+  x86MenuEntry="$sourceDataHome/applications/steam-asahi-x86-Routed Menu.desktop"
+  grep -Fx 'Exec=steam-asahi-x86 steam://rungameid/777777' "$x86MenuEntry"
+  test "$(stat -c %a "$x86MenuEntry")" = 644
+  test -f "$sourceDataHome/applications/steam-asahi-x86-Other Game.desktop"
+  test ! -e "$sourceDataHome/applications/steam-asahi-x86-Gone Game.desktop"
   grep -Fx Icon=steam_icon_999999 "$exportedEntry"
   grep -Fx X-SteamAsahi-Managed=true "$exportedEntry"
   test "$(stat -c %a "$exportedEntry")" = 755

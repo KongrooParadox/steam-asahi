@@ -8,11 +8,12 @@
   configuration,
   runtimeInputs,
   meta,
+  # Repaired game shortcuts run this command, so the launcher's name has to
+  # match its executable. Each backend has its own name, so both can be
+  # installed side by side
+  launcherName,
 }:
 let
-  # Repaired game shortcuts run this command, so the launcher's own name has
-  # to stay in step with the executable
-  launcherName = "steam-asahi";
   python = python314.withPackages (packages: [
     packages.boltons
     packages.msgspec

@@ -8,7 +8,6 @@
 let
   inherit (lib.attrsets)
     filterAttrs
-    mapAttrs
     optionalAttrs
     ;
   inherit (lib.lists)
@@ -18,7 +17,6 @@ let
     optionals
     ;
   inherit (lib.modules)
-    mkDefault
     mkIf
     mkMerge
     ;
@@ -27,12 +25,68 @@ let
   cfg = config.programs.steam-asahi;
   launcherTypes = (import ../../lib/launcher/options.nix { inherit lib; }).types;
 
+  # Both backends are installed. `backend` chooses which one the plain
+  # `steam-asahi` command and the default menu entry start
   backendPackages = {
     x86-fex = pkgs.steam-asahi;
     arm64 = pkgs.steam-asahi-arm64;
   };
+  otherBackend = if cfg.backend == "arm64" then "x86-fex" else "arm64";
 
   backendEnvironments = import ../../lib/launcher/environments.nix;
+
+  # Module values reach every installed backend. Each package keeps its own
+  # defaults, and only the arm64 package receives the arm64-only arguments
+  withModuleValues =
+    backend: package:
+    package.override (
+      previous:
+      {
+        inherit (cfg) cpuList memoryMiB vramMiB;
+        # Match nixpkgs' Steam module by preserving customization already applied
+        # to the package. Backend defaults sit above it, and module values win per
+        # variable. Null continues to mean removal
+        extraEnv = filterAttrs (_: value: value != null) (
+          (previous.extraEnv or { }) // backendEnvironments.${backend} // cfg.extraEnv
+        );
+        inherit publishPorts;
+      }
+      // optionalAttrs (backend == "arm64") {
+        inherit (cfg) customSteamHomeDir;
+        x86Games = map toString cfg.x86Games;
+      }
+    );
+
+  otherPackage = withModuleValues otherBackend backendPackages.${otherBackend};
+
+  # The plain command and the default menu entry, which owns steam:// links
+  defaultLauncher = pkgs.writeShellApplication {
+    name = "steam-asahi";
+    inheritPath = false;
+    text = ''
+      exec ${lib.meta.getExe cfg.package} "$@"
+    '';
+  };
+  defaultDesktopItem = pkgs.makeDesktopItem {
+    name = "steam-asahi";
+    desktopName = "Steam (Asahi)";
+    comment =
+      if cfg.backend == "arm64" then
+        "Native ARM64 Steam public beta in a 4K-page microVM"
+      else
+        "Steam on Apple Silicon via muvm + FEX-Emu";
+    exec = "steam-asahi %U";
+    icon = "steam";
+    startupNotify = true;
+    categories = [
+      "Game"
+      "Network"
+    ];
+    mimeTypes = [
+      "x-scheme-handler/steam"
+      "x-scheme-handler/steamlink"
+    ];
+  };
 
   hasPulseAudioServer =
     config.services.pulseaudio.enable
@@ -109,10 +163,13 @@ in
       ];
       default = "x86-fex";
       description = ''
-        Steam client backend. `x86-fex` runs the established x86 client
-        through FEX, while `arm64` runs Valve's experimental native ARM64
-        public beta. Both use muvm because Asahi hosts use 16K pages while
-        Valve's binaries currently require a conventional 4K-page environment.
+        Backend behind the plain `steam-asahi` command and the default menu
+        entry. Both backends stay installed, so `steam-asahi-arm64` and
+        `steam-asahi-x86` start either client without a rebuild. `x86-fex` runs
+        the established x86 client through FEX, while `arm64` runs Valve's
+        experimental native ARM64 public beta. Both use muvm because Asahi hosts
+        use 16K pages while Valve's binaries currently require a conventional
+        4K-page environment.
       '';
     };
 
@@ -125,22 +182,7 @@ in
         else
           pkgs.steam-asahi
       '';
-      apply =
-        package:
-        package.override (
-          previous:
-          {
-            inherit (cfg) cpuList memoryMiB vramMiB;
-            # Match nixpkgs' Steam module by preserving customization already
-            # applied to the selected package. Module values win per variable,
-            # and null continues to mean removal
-            extraEnv = filterAttrs (_: value: value != null) ((previous.extraEnv or { }) // cfg.extraEnv);
-            inherit publishPorts;
-          }
-          // optionalAttrs (cfg.backend == "arm64") {
-            inherit (cfg) customSteamHomeDir;
-          }
-        );
+      apply = withModuleValues cfg.backend;
       description = ''
         The Steam Asahi launcher package to use. The package is overridden with
         {option}`programs.steam-asahi.cpuList`,
@@ -224,22 +266,43 @@ in
       '';
     };
 
+    x86Games = mkOption {
+      type = lib.types.listOf lib.types.ints.positive;
+      default = [ ];
+      example = [ 1158310 ];
+      description = ''
+        Steam AppIDs that run only on the x86/FEX backend. The ARM64 client does
+        not export menu entries for them, so its menu cannot start them. Add
+        their shortcuts from the x86 client; the x86 launcher repairs those
+        shortcuts to run `steam-asahi-x86`.
+      '';
+    };
+
+    installedPackages = mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      readOnly = true;
+      internal = true;
+      default = {
+        x86-fex = if cfg.backend == "x86-fex" then cfg.package else otherPackage;
+        arm64 = if cfg.backend == "arm64" then cfg.package else otherPackage;
+      };
+      description = "Launcher packages installed for each backend.";
+    };
+
     extraEnv = mkOption {
       type = launcherTypes.extraEnv;
       default = { };
-      defaultText = lib.options.literalMD "defaults selected by {option}`programs.steam-asahi.backend`";
       example = {
         MANGOHUD = "1";
         FEX_MULTIBLOCK = null;
       };
       description = ''
-        Environment variables exported inside the selected Steam backend. Names
+        Environment variables exported inside every installed backend. Names
         must be valid shell variable names, such as `MANGOHUD` or `STEAMOS`.
-        Backend defaults are merged per variable, so additional variables do
-        not discard them. Set a variable to `null` to remove its backend
-        default. Both backends set `GTK_IM_MODULE=xim` and
-        `PRESSURE_VESSEL_IMPORT_VULKAN_LAYERS=0`. The `x86-fex` backend also
-        sets `FEX_MULTIBLOCK=0`, `STEAMOS=1`, and `STEAM_RUNTIME=1`.
+        Each backend keeps its own defaults, and these values are merged per
+        variable on top of them. Set a variable to `null` to remove it from every
+        backend. For example, `FEX_MULTIBLOCK = null` removes the x86 default and
+        leaves the ARM64 backend unchanged.
       '';
     };
 
@@ -272,13 +335,6 @@ in
   };
 
   config = mkMerge [
-    {
-      # Put defaults in the module configuration rather than the option
-      # declaration. Keeping the priority on each value lets users add or
-      # override one variable without replacing every backend default
-      programs.steam-asahi.extraEnv = mapAttrs (_: mkDefault) backendEnvironments.${cfg.backend};
-    }
-
     (mkIf cfg.enable {
       assertions = [
         {
@@ -315,12 +371,15 @@ in
           `users.users.<name>.extraGroups = [ "kvm" ];`.
         '';
 
-      environment.systemPackages = builtins.attrValues {
-        inherit (cfg) package;
+      environment.systemPackages = [
+        defaultLauncher
+        defaultDesktopItem
+        cfg.package
+        otherPackage
         # Useful for direct guest diagnostics documented in the README. The
         # launcher's other dependencies are already referenced by its closure
-        inherit (pkgs) muvm;
-      };
+        pkgs.muvm
+      ];
 
       # Host Mesa/virglrenderer provides Asahi DRM native-context rendering;
       # steam-hardware supplies the standard controller and input udev rules

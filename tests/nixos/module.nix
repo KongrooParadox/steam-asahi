@@ -59,6 +59,17 @@ let
     };
   };
 
+  routedArm64 = mkAarch64System {
+    programs.steam-asahi = {
+      backend = "arm64";
+      x86Games = [ 1158310 ];
+    };
+    services.pipewire = {
+      enable = true;
+      pulse.enable = true;
+    };
+  };
+
   probePackage = defaults.pkgs.callPackage (
     {
       cpuList ? null,
@@ -183,32 +194,45 @@ let
   muvmWirePlumberConfig = head muvmWirePlumberConfigs;
 in
 assert builtins.length deduplicated.config.nixpkgs.overlays == 1;
+assert defaults.config.programs.steam-asahi.extraEnv == { };
 assert
-  defaults.config.programs.steam-asahi.extraEnv == {
+  defaults.config.programs.steam-asahi.package.extraEnv == {
     FEX_MULTIBLOCK = "0";
+    GODEBUG = "asyncpreemptoff=1";
     GTK_IM_MODULE = "xim";
     PRESSURE_VESSEL_IMPORT_VULKAN_LAYERS = "0";
     STEAMOS = "1";
     STEAM_RUNTIME = "1";
   };
 assert
-  arm64.config.programs.steam-asahi.extraEnv == {
+  defaults.config.programs.steam-asahi.installedPackages.arm64.extraEnv == {
     GTK_IM_MODULE = "xim";
     PRESSURE_VESSEL_IMPORT_VULKAN_LAYERS = "0";
   };
+assert
+  arm64.config.programs.steam-asahi.package.extraEnv == {
+    GTK_IM_MODULE = "xim";
+    PRESSURE_VESSEL_IMPORT_VULKAN_LAYERS = "0";
+  };
+assert arm64.config.programs.steam-asahi.installedPackages.x86-fex.extraEnv.STEAMOS == "1";
 assert
   customHomeArm64.config.programs.steam-asahi.package.customSteamHomeDir == "custom-arm64-home";
 assert
   customized.config.programs.steam-asahi.extraEnv == {
     FEX_MULTIBLOCK = null;
+    MANGOHUD = "1";
+  };
+assert
+  customized.config.programs.steam-asahi.installedPackages.arm64.extraEnv == {
     GTK_IM_MODULE = "xim";
     MANGOHUD = "1";
     PRESSURE_VESSEL_IMPORT_VULKAN_LAYERS = "0";
-    STEAMOS = "1";
-    STEAM_RUNTIME = "1";
   };
+assert routedArm64.config.programs.steam-asahi.installedPackages.arm64.x86Games == [ "1158310" ];
+assert defaults.config.programs.steam-asahi.installedPackages.arm64.x86Games == [ ];
 assert
   customized.config.programs.steam-asahi.package.extraEnv == {
+    GODEBUG = "asyncpreemptoff=1";
     GTK_IM_MODULE = "xim";
     MANGOHUD = "1";
     PACKAGE_ENVIRONMENT = "preserved";
@@ -267,6 +291,8 @@ assert defaults.config.hardware.steam-hardware.enable;
 assert builtins.length muvmWirePlumberConfigs == 1;
 assert noAudio.config.services.pipewire.wireplumber.configPackages == [ ];
 assert elem defaults.config.programs.steam-asahi.package defaults.config.environment.systemPackages;
+assert elem defaults.config.programs.steam-asahi.installedPackages.arm64
+  defaults.config.environment.systemPackages;
 assert elem defaults.pkgs.muvm defaults.config.environment.systemPackages;
 assert !(elem defaults.pkgs.fex defaults.config.environment.systemPackages);
 assert builtins.length (steamAsahiFailures conflicts) == 2;

@@ -58,6 +58,14 @@ let
     ];
     extraEnv.TEST_ENVIRONMENT = "value with spaces";
   };
+
+  # `package` overrides extraEnv, so this one keeps the backend's defaults
+  defaultEnvironmentPackage = steam-asahi.override {
+    muvm = fakeMuvm;
+    fex = fakeFex;
+    steam-unwrapped = fakeSteam;
+    muvmHostMount = "/tmp/steam-asahi-muvm-host";
+  };
 in
 runCommand "steam-asahi-launcher-test" { } ''
   export HOME="$TMPDIR/home with spaces"
@@ -78,7 +86,7 @@ runCommand "steam-asahi-launcher-test" { } ''
   Type=Application
   Name=Test Game
   Exec=steam steam://rungameid/999999
-  Icon=steam_icon_999999
+  Icon=steam
   EOF
   chmod 0755 "$HOME/Desktop/Test Game.desktop"
   cp "$HOME/Desktop/Test Game.desktop" \
@@ -117,11 +125,13 @@ runCommand "steam-asahi-launcher-test" { } ''
   grep -F -- '/bin/FEXBash' "$HOME/steam-arguments"
   fex_line=$(grep -Fn -- '/bin/FEXBash' "$HOME/steam-arguments" \
     | cut -d: -f1)
-  test "$(sed -n "$((fex_line + 1))p" "$HOME/steam-arguments")" = \
-    'exec /bin/bash "$@"'
+  # FEXBash forwards its arguments to /bin/sh, so -c must precede the command
+  test "$(sed -n "$((fex_line + 1))p" "$HOME/steam-arguments")" = -c
   test "$(sed -n "$((fex_line + 2))p" "$HOME/steam-arguments")" = \
+    'exec /bin/bash "$@"'
+  test "$(sed -n "$((fex_line + 3))p" "$HOME/steam-arguments")" = \
     steam-asahi-fex
-  sed -n "$((fex_line + 3))p" "$HOME/steam-arguments" \
+  sed -n "$((fex_line + 4))p" "$HOME/steam-arguments" \
     | grep -F -- '-fex-steam.sh'
   grep -Fx -- '-cef-force-occlusion' "$HOME/steam-arguments"
   grep -Fx -- 'TEST_ENVIRONMENT=value with spaces' "$HOME/steam-arguments"
@@ -134,12 +144,18 @@ runCommand "steam-asahi-launcher-test" { } ''
   # replaced. A second launch must not add a second marker.
   desktopEntry="$HOME/Desktop/Test Game.desktop"
   menuEntry="$XDG_DATA_HOME/applications/Test Game.desktop"
-  grep -Fx 'Exec=steam-asahi steam://rungameid/999999' "$desktopEntry"
-  grep -Fx 'Exec=steam-asahi steam://rungameid/999999' "$menuEntry"
-  grep -Fx Icon=steam_icon_999999 "$desktopEntry"
+  grep -Fx 'Exec=steam-asahi-x86 steam://rungameid/999999' "$desktopEntry"
+  grep -Fx 'Exec=steam-asahi-x86 steam://rungameid/999999' "$menuEntry"
+  grep -Fx Icon=steam "$desktopEntry"
   test "$(grep -Fxc X-SteamAsahi-Managed=true "$desktopEntry")" = 1
   test "$(stat -c %a "$desktopEntry")" = 755
   test "$(stat -c %a "$menuEntry")" = 644
+  # The mirror carries the per-game artwork under this backend's prefix. Later
+  # launches find the Desktop entry already repaired, and must keep the mirror
+  mirrorEntry="$XDG_DATA_HOME/applications/steam-asahi-x86-Test Game.desktop"
+  grep -Fx 'Exec=steam-asahi-x86 steam://rungameid/999999' "$mirrorEntry"
+  grep -Fx Icon=steam_icon_999999 "$mirrorEntry"
+  test "$(grep -Fxc X-SteamAsahi-Managed=true "$mirrorEntry")" = 1
   test "$(sha256sum "$XDG_DATA_HOME/applications/unrelated.desktop")" = \
     "$unrelatedHash"
 
@@ -147,17 +163,28 @@ runCommand "steam-asahi-launcher-test" { } ''
   printf '%s\n' preserved > "$data_directory/steam-launcher/bin_steam.sh"
   ${lib.meta.getExe package}
   grep -Fx preserved "$data_directory/steam-launcher/bin_steam.sh"
+  test -f "$mirrorEntry"
+
+  # The backend's default environment reaches the Steam guest. Go's
+  # asynchronous preemption corrupts goroutine stacks under FEX, so the default
+  # must disable it for every guest process.
+  ${lib.meta.getExe defaultEnvironmentPackage}
+  env_line=$(grep -Fxn -- 'GODEBUG=asyncpreemptoff=1' "$HOME/muvm-arguments" \
+    | cut -d: -f1)
+  test -n "$env_line"
+  test "$(sed -n "$((env_line - 1))p" "$HOME/muvm-arguments")" = -e
 
   diagnostic_command='printf "%s\n" "hello world"'
   ${lib.meta.getExe package} --fex "$diagnostic_command"
   grep -F -- '-fex-diagnostic.sh' "$HOME/muvm-arguments"
   fex_line=$(grep -Fn -- '/bin/FEXBash' "$HOME/muvm-arguments" \
     | cut -d: -f1)
-  test "$(sed -n "$((fex_line + 1))p" "$HOME/muvm-arguments")" = \
-    'exec /bin/bash "$@"'
+  test "$(sed -n "$((fex_line + 1))p" "$HOME/muvm-arguments")" = -c
   test "$(sed -n "$((fex_line + 2))p" "$HOME/muvm-arguments")" = \
+    'exec /bin/bash "$@"'
+  test "$(sed -n "$((fex_line + 3))p" "$HOME/muvm-arguments")" = \
     steam-asahi-fex
-  sed -n "$((fex_line + 3))p" "$HOME/muvm-arguments" \
+  sed -n "$((fex_line + 4))p" "$HOME/muvm-arguments" \
     | grep -F -- '-fex-diagnostic.sh'
   grep -Fx -- "$diagnostic_command" "$HOME/muvm-arguments"
   test "$(grep -Fxc -- '--publish' "$HOME/muvm-arguments")" = 2
