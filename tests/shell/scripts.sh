@@ -510,6 +510,7 @@ EOF
       CUSTOM_STEAM_HOME_DIR= \
       DEFAULT_STEAM_HOME_DIR=steam-asahi-arm64-home \
       DISPLAY_NAME='Test Proton' \
+      ENTRY_PREFIX=steam-asahi- \
       GUEST_LAUNCHER=/guest-launcher \
       HOME="${home}" \
       HOST_LIBRARIES="${launcher_root}/host-libs" \
@@ -528,6 +529,7 @@ EOF
       TEST_MUVM_HOLD_FILE="${TEST_MUVM_HOLD_FILE:-}" \
       TEST_MUVM_OUTPUT="${output}" \
       TOOL_MANIFEST="${launcher_root}/toolmanifest.vdf" \
+      X86_GAMES='[]' \
       XDG_DATA_HOME="${home}/data" \
       XDG_RUNTIME_DIR="${runtime_directory}" \
       YAD="${launcher_root}/yad" \

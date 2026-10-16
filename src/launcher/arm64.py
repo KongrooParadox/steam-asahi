@@ -19,6 +19,8 @@ from common import (
     STEAM_CLIENT_ARGS,
     LauncherError,
     copy_bootstrap,
+    desktop_entry_app_id,
+    desktop_entry_exec_command,
     desktop_entry_is_managed,
     exec_guest,
     executable,
@@ -254,6 +256,13 @@ class Arm64Launcher:
             return True
         if source.stat().st_mtime_ns > target.stat().st_mtime_ns:
             return True
+        if (
+            desktop_entry_exec_command(target)
+            != self.config["LAUNCHER_COMMAND"]
+        ):
+            # Rewrites a mirror that names another launcher command, such as one
+            # written before the backends had their own names
+            return True
         return stat.S_IMODE(source.stat().st_mode) != stat.S_IMODE(
             target.stat().st_mode
         )
@@ -264,15 +273,25 @@ class Arm64Launcher:
         # into the real data home and drop the exports whose originals are
         # gone.
         config = self.config
-        prefix = f"{config['LAUNCHER_COMMAND']}-"
+        # Fixed per install, so exports written before the backends had their
+        # own command names keep the same file names
+        prefix = config["ENTRY_PREFIX"]
+        # Games that only the x86 backend can run are not mirrored. This client
+        # would start them and fail, so their menu entries belong to the x86
+        # launcher
+        x86_games = frozenset(config["X86_GAMES"])
         sources = [
             self.home / "Desktop",
             self.home / ".local/share/applications",
         ]
         target_directory = self.source_data_home / "applications"
         target_directory.mkdir(parents=True, exist_ok=True)
+        exported_names: set[str] = set()
         for source_directory in sources:
             for source_path in source_directory.glob("*.desktop"):
+                if desktop_entry_app_id(source_path) in x86_games:
+                    continue
+                exported_names.add(source_path.name)
                 target_path = target_directory / f"{prefix}{source_path.name}"
                 if not self.entry_needs_export(source_path, target_path):
                     continue
@@ -283,10 +302,7 @@ class Arm64Launcher:
             if not desktop_entry_is_managed(target_path):
                 continue
             entry_name = target_path.name.removeprefix(prefix)
-            if any(
-                (source_directory / entry_name).is_file()
-                for source_directory in sources
-            ):
+            if entry_name in exported_names:
                 continue
             target_path.unlink(missing_ok=True)
 

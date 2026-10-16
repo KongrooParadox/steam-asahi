@@ -155,10 +155,11 @@ class FexLauncher:
         )
 
     def fex_arguments(self, script: str, arguments: list[str]) -> list[str]:
-        # FEXBash interprets a command string; remaining argv stays intact
+        # FEXBash runs /bin/sh with these arguments, so -c selects the command
         return [
             "--",
             self.config["FEX_BASH"],
+            "-c",
             FEX_BASH_COMMAND,
             "steam-asahi-fex",
             script,

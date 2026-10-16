@@ -13,6 +13,10 @@
     # Match nixpkgs' Steam wrapper so GTK input methods also work when the
     # surrounding locale is not CJK-specific.
     GTK_IM_MODULE = "xim";
+    # Go's asynchronous preemption signal (SIGURG) corrupts goroutine stacks
+    # under FEX, crashing Go programs inside the runtime. Synchronous preemption
+    # avoids the signal and keeps those programs running.
+    GODEBUG = "asyncpreemptoff=1";
   };
 
   arm64 = {

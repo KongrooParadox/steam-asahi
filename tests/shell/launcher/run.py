@@ -20,6 +20,7 @@ keys = (
     "CUSTOM_STEAM_HOME_DIR",
     "DEFAULT_STEAM_HOME_DIR",
     "DISPLAY_NAME",
+    "ENTRY_PREFIX",
     "GUEST_LAUNCHER",
     "HOST_LIBRARIES",
     "INIT_SCRIPT",
@@ -36,6 +37,7 @@ keys = (
     "YAD",
 )
 configuration = {key: os.environ[key] for key in keys}
+configuration["X86_GAMES"] = json.loads(os.environ["X86_GAMES"])
 configuration.update(
     BACKEND="arm64", CPU_ARGS=[], MEMORY_ARGS=[], NETWORK_ARGS=[], VRAM_ARGS=[]
 )

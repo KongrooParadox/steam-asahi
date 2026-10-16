@@ -138,6 +138,7 @@ with less RAM.
 | `memoryMiB`                                  | Limit the microVM's memory in MiB                      |
 | `vramMiB`                                    | Set the GPU heap size reported inside the guest        |
 | `extraEnv`                                   | Add or replace guest environment variables             |
+| `x86Games`                                   | Keep x86-only AppIDs out of the ARM64 menu             |
 | `remotePlay.openFirewall`                    | Enable Remote Play ports                               |
 | `dedicatedServer.openFirewall`               | Enable Source server ports                             |
 | `localNetworkGameTransfers.openFirewall`     | Enable local transfer ports                            |
@@ -200,6 +201,10 @@ menu") become usable on the host a few seconds after the client writes them.
 The ARM64 backend keeps its entries below the isolated home, so they are
 mirrored into `$XDG_DATA_HOME/applications` as `steam-asahi-«name».desktop`
 together with their artwork.
+
+Games listed in `programs.steam-asahi.x86Games` run only on the x86 backend, so
+the ARM64 client does not mirror their shortcuts. Add those shortcuts from the
+x86 client; the x86 launcher repairs them to run `steam-asahi-x86`.
 
 Entries the launcher manages carry `X-SteamAsahi-Managed=true`. It removes
 only entries carrying that marker, and never removes icons.

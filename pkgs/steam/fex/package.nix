@@ -32,7 +32,7 @@
   extraEnv ? launcherEnvironments.x86-fex,
 }:
 
-assert launcherOptions.validate "steam-asahi" {
+assert launcherOptions.validate "steam-asahi-x86" {
   inherit
     cpuList
     memoryMiB
@@ -86,6 +86,7 @@ let
   steamBootstrap = callPackage ./bootstrap.nix { inherit steam-unwrapped; };
 
   launcher = mkHostLauncher {
+    launcherName = "steam-asahi-x86";
     runtimeInputs = [
       coreutils
       squashfuse
@@ -124,18 +125,19 @@ let
       # over and launches Valve's unfree redistributable Steam client
       license = lib.licenses.unfree;
       platforms = [ "aarch64-linux" ];
-      mainProgram = "steam-asahi";
+      mainProgram = "steam-asahi-x86";
     };
   };
 
 in
 (mkLauncherPackage.override { inherit steam-unwrapped; }) {
-  pname = "steam-asahi";
+  pname = "steam-asahi-x86";
   inherit (steam-unwrapped) version;
   inherit launcher;
-  desktopName = "Steam (Asahi)";
+  desktopName = "Steam (Asahi x86)";
   comment = "Steam on Apple Silicon via muvm + FEX-Emu";
   passthru = {
+    inherit extraEnv;
     backend = "x86-fex";
   };
 }

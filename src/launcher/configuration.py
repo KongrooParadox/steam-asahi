@@ -32,6 +32,7 @@ class Arm64Configuration(LauncherConfiguration):
     CUSTOM_STEAM_HOME_DIR: str
     DEFAULT_STEAM_HOME_DIR: str
     DISPLAY_NAME: str
+    ENTRY_PREFIX: str
     GUEST_LAUNCHER: str
     HOST_LIBRARIES: str
     PROTON_DIRECTORY: str
@@ -42,6 +43,7 @@ class Arm64Configuration(LauncherConfiguration):
     RUNTIME_APP_ID: str
     RUNTIME_DIRECTORY: str
     TOOL_MANIFEST: str
+    X86_GAMES: list[str]
 
 
 class FexConfiguration(LauncherConfiguration):

@@ -25,6 +25,7 @@ let
       5
     ];
     customSteamHomeDir = "isolated ARM home";
+    x86Games = [ "777777" ];
     memoryMiB = 4096;
     vramMiB = 2048;
     publishPorts = [
@@ -71,6 +72,24 @@ runCommand "steam-asahi-arm64-launcher-test" { } ''
   Icon=steam_icon_999999
   EOF
   chmod 0755 "$isolatedHome/Desktop/Test Game.desktop"
+  # A shortcut for a game the x86 backend runs. This client must not mirror it,
+  # and a mirror left by an earlier export must be removed
+  cat >"$isolatedHome/Desktop/Routed Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Routed Game
+  Exec=steam steam://rungameid/777777
+  Icon=steam_icon_777777
+  EOF
+  chmod 0755 "$isolatedHome/Desktop/Routed Game.desktop"
+  mkdir -p "$sourceDataHome/applications"
+  cat >"$sourceDataHome/applications/steam-asahi-Routed Game.desktop" <<'EOF'
+  [Desktop Entry]
+  Type=Application
+  Name=Routed Game
+  Exec=steam-asahi steam://rungameid/777777
+  X-SteamAsahi-Managed=true
+  EOF
   printf '%s\n' shortcut-icon \
     >"$isolatedHome/.local/share/icons/hicolor/64x64/apps/steam_icon_999999.png"
   touch \
@@ -154,7 +173,8 @@ runCommand "steam-asahi-arm64-launcher-test" { } ''
     "$steamDirectory/config/config.vdf")" = 1
 
   exportedEntry="$sourceDataHome/applications/steam-asahi-Test Game.desktop"
-  grep -Fx 'Exec=steam-asahi steam://rungameid/999999' "$exportedEntry"
+  grep -Fx 'Exec=steam-asahi-arm64 steam://rungameid/999999' "$exportedEntry"
+  test ! -e "$sourceDataHome/applications/steam-asahi-Routed Game.desktop"
   grep -Fx Icon=steam_icon_999999 "$exportedEntry"
   grep -Fx X-SteamAsahi-Managed=true "$exportedEntry"
   test "$(stat -c %a "$exportedEntry")" = 755

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 # and record the change with the marker below
 CLIENT_COMMAND_NAME = "steam"
 MANAGED_ENTRY_MARKER = "X-SteamAsahi-Managed=true"
+RUNGAMEID_PREFIX = "steam://rungameid/"
 PRESSURE_VESSEL_FILESYSTEMS_RO = "/nix:/run/opengl-driver"
 SHORTCUT_REFRESH_INTERVAL_SECONDS = 5
 STEAM_CLIENT_ARGS = ("-cef-force-occlusion",)
@@ -118,6 +119,21 @@ def desktop_entry_is_managed(path: Path) -> bool:
     return any(
         line == MANAGED_ENTRY_MARKER for line in desktop_entry_lines(path)
     )
+
+
+def desktop_entry_app_id(path: Path) -> str | None:
+    # Client shortcuts name their game in the Exec line
+    for line in desktop_entry_lines(path):
+        if line.startswith("Exec=") and RUNGAMEID_PREFIX in line:
+            return line.split(RUNGAMEID_PREFIX, 1)[1].split(" ", 1)[0]
+    return None
+
+
+def desktop_entry_exec_command(path: Path) -> str | None:
+    for line in desktop_entry_lines(path):
+        if line.startswith("Exec="):
+            return line.removeprefix("Exec=").split(" ", 1)[0]
+    return None
 
 
 def install_managed_desktop_entry(
