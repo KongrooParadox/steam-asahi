@@ -19,5 +19,6 @@ upstream.overrideAttrs (
       inherit (finalAttrs) src;
       hash = "sha256-HDHo/NfQM16JU9DbblFw2jxPEhhgdE/EUgBriKg/6uM=";
     };
+    patches = [ ./bridge-dbus.patch ];
   }
 )

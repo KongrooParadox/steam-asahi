@@ -1,0 +1,66 @@
+diff -ruN a/crates/muvm/src/bin/muvm.rs b/crates/muvm/src/bin/muvm.rs
+--- a/crates/muvm/src/bin/muvm.rs	2026-09-25 12:07:00.000000000 +0000
++++ b/crates/muvm/src/bin/muvm.rs	2026-10-18 23:50:53.264595737 +0000
+@@ -27,7 +27,8 @@
+ use muvm::net::{connect_to_passt, start_passt};
+ use muvm::types::MiB;
+ use muvm::utils::launch::{
+-    GuestConfiguration, Launch, ATSPI_SOCKET, HIDPIPE_SOCKET, MUVM_GUEST_SOCKET, PULSE_SOCKET,
++    GuestConfiguration, Launch, ATSPI_SOCKET, DBUS_SOCKET, HIDPIPE_SOCKET, MUVM_GUEST_SOCKET,
++    PULSE_SOCKET,
+ };
+ use nix::sys::sysinfo::sysinfo;
+ use nix::unistd::User;
+@@ -355,6 +356,22 @@
+     }
+ 
+     if let Some(run_path) = &xdg_runtime_dir {
++        let dbus_path = Path::new(&run_path).join("bus");
++        if dbus_path.exists() {
++            let dbus_path = CString::new(
++                dbus_path
++                    .to_str()
++                    .expect("dbus_path should not contain invalid UTF-8"),
++            )
++            .context("Failed to process `bus` path as it contains NUL character")?;
++            // SAFETY: `dbus_path` is a pointer to a CString with long enough lifetime.
++            let err = unsafe { krun_add_vsock_port(ctx_id, DBUS_SOCKET, dbus_path.as_ptr()) };
++            if err < 0 {
++                let err = Errno::from_raw_os_error(-err);
++                return Err(err).context("Failed to configure vsock for dbus socket");
++            }
++        }
++
+         let hidpipe_path = Path::new(&run_path).join("hidpipe");
+         spawn_hidpipe_server(hidpipe_path.clone()).context("Failed to spawn hidpipe thread")?;
+         let hidpipe_path = CString::new(
+diff -ruN a/crates/muvm/src/guest/bin/muvm-guest.rs b/crates/muvm/src/guest/bin/muvm-guest.rs
+--- a/crates/muvm/src/guest/bin/muvm-guest.rs	2026-09-25 12:07:00.000000000 +0000
++++ b/crates/muvm/src/guest/bin/muvm-guest.rs	2026-10-18 23:50:53.264595737 +0000
+@@ -19,7 +19,7 @@
+ use muvm::guest::user::setup_user;
+ use muvm::guest::x11::setup_x11_forwarding;
+ use muvm::utils::env::get_var_if_exists;
+-use muvm::utils::launch::{Emulator, GuestConfiguration, PULSE_SOCKET};
++use muvm::utils::launch::{DBUS_SOCKET, Emulator, GuestConfiguration, PULSE_SOCKET};
+ use nix::unistd::{Gid, Uid};
+ use rustix::process::{getrlimit, setrlimit, Resource};
+ 
+@@ -142,6 +142,9 @@
+     let pulse_path = pulse_path.join("native");
+     setup_socket_proxy(pulse_path, PULSE_SOCKET)?;
+ 
++    let dbus_path = run_path.join("bus");
++    setup_socket_proxy(dbus_path, DBUS_SOCKET)?;
++
+     if let Some(host_display) = options.host_display {
+         setup_x11_forwarding(run_path, &host_display)?;
+     }
+diff -ruN a/crates/muvm/src/utils/launch.rs b/crates/muvm/src/utils/launch.rs
+--- a/crates/muvm/src/utils/launch.rs	2026-09-25 12:07:00.000000000 +0000
++++ b/crates/muvm/src/utils/launch.rs	2026-10-18 23:50:53.260595722 +0000
+@@ -53,3 +53,4 @@
+ pub const HIDPIPE_SOCKET: u32 = PULSE_SOCKET + 1;
+ pub const MUVM_GUEST_SOCKET: u32 = HIDPIPE_SOCKET + 1;
+ pub const ATSPI_SOCKET: u32 = MUVM_GUEST_SOCKET + 1;
++pub const DBUS_SOCKET: u32 = ATSPI_SOCKET + 1;
